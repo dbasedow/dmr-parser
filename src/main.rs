@@ -20,11 +20,36 @@ fn main() {
 
     let mut name_extra_buf = vec![0; name_len + extra_len];
     f.read_exact(&mut name_extra_buf);
-    println!("{}", from_utf8(&name_extra_buf[..name_len]).unwrap());
+    println!("parsing {}", from_utf8(&name_extra_buf[..name_len]).unwrap());
 
     let mut deflater = DeflateDecoder::new(f);
     let mut deflater = BufReader::new(deflater);
+    
+    let mut count = 0;
+    let mut str_buf = String::with_capacity(10_000_000);
 
+    let mut count_in_buf = 0;
+    let mut liter = deflater.lines();
+
+    for line in liter {
+        let line = line.unwrap();
+        match line {
+            ref line if "    <ns:Statistik>" == line => {
+                count_in_buf += 1;
+                str_buf.push_str(&line);
+            },
+            ref line if "    </ns:Statistik>" == line => {
+                str_buf.push_str(&line);
+                if count_in_buf > 100 {
+                    //TODO: move buffer into thread for parsing
+                    return;
+                }
+            },
+            ref line if count_in_buf > 0 => str_buf.push_str(&line),
+            _ => continue,
+        }
+    }
+/*
     let parser = EventReader::new(deflater);
 
     let mut count = 0;
@@ -38,4 +63,5 @@ fn main() {
         }
     }
     println!("{}", count);
+    */
 }
