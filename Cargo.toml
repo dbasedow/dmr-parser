@@ -1,0 +1,8 @@
+[package]
+name = "dmrparse"
+version = "0.1.0"
+authors = ["danielbasedow <daniel.basedow@gmail.com>"]
+
+[dependencies]
+flate2 = "1.0"
+xml-rs = "0.8"
