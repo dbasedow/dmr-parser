@@ -1,18 +1,39 @@
 extern crate flate2;
-extern crate xml;
+extern crate quick_xml;
 
-use std::fs::File;
-use std::io::{Read, BufRead, BufReader};
-use std::str::from_utf8;
 use flate2::bufread::DeflateDecoder;
-use xml::reader::{EventReader, XmlEvent};
+use std::fs::File;
+use std::io;
+use std::io::{BufRead, BufReader, Read};
+use std::str::from_utf8;
+//use xml::reader::{EventReader, XmlEvent};
+use quick_xml::Reader;
+use quick_xml::events::Event;
+use reader::{DoubleBufferReader};
+
+fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error> {
+    let mut offset = 0;
+    loop {
+        println!("{}", offset);
+        if offset == buf.len() {
+            return Ok(offset);
+        }
+        match rdr.read(&mut buf[offset..]) {
+            Ok(0) => return Ok(offset),
+            Ok(n) => offset += n,
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+}
 
 fn main() {
-    let f = File::open("ESStatistikListeModtag-20180617-233202.zip").unwrap();
+    let f = File::open("ESStatistikListeModtag-20180610-200409.zip").unwrap();
     let mut f = BufReader::new(f);
     let mut header_buf = [0; 30];
 
-    f.read_exact(&mut header_buf).expect("unable to read header");
+    f.read_exact(&mut header_buf)
+        .expect("unable to read header");
 
     assert_eq!(header_buf[..4], [0x50, 0x4b, 0x03, 0x04]);
     let name_len = ((header_buf[27] as usize) << 8) + header_buf[26] as usize;
@@ -20,36 +41,40 @@ fn main() {
 
     let mut name_extra_buf = vec![0; name_len + extra_len];
     f.read_exact(&mut name_extra_buf);
-    println!("parsing {}", from_utf8(&name_extra_buf[..name_len]).unwrap());
+    println!(
+        "parsing {}",
+        from_utf8(&name_extra_buf[..name_len]).unwrap()
+    );
 
     let mut deflater = DeflateDecoder::new(f);
-    let mut deflater = BufReader::new(deflater);
-    
-    let mut count = 0;
-    let mut str_buf = String::with_capacity(10_000_000);
+    //let mut deflater = BufReader::new(deflater);
 
-    let mut count_in_buf = 0;
-    let mut liter = deflater.lines();
+    let mut buf1 = vec![0; 100_000_000];
+    let mut buf2 = vec![0; 100_000_000];
 
-    for line in liter {
-        let line = line.unwrap();
-        match line {
-            ref line if "    <ns:Statistik>" == line => {
-                count_in_buf += 1;
-                str_buf.push_str(&line);
-            },
-            ref line if "    </ns:Statistik>" == line => {
-                str_buf.push_str(&line);
-                if count_in_buf > 100 {
-                    //TODO: move buffer into thread for parsing
-                    return;
-                }
-            },
-            ref line if count_in_buf > 0 => str_buf.push_str(&line),
-            _ => continue,
-        }
+    //TODO: try!
+    if let Ok(n) = fill_buffer(&mut buf1, &mut deflater) {
+        println!("ok: {}", n);
     }
-/*
+    if let Ok(n) = fill_buffer(&mut buf2, &mut deflater) {
+        println!("ok: {}", n);
+    }
+    let dbr = DoubleBufferReader::new(&buf1, &buf2);
+    let mut br = BufReader::new(dbr);
+
+    let mut xml = Reader::from_reader(br);
+    let mut count = 0;
+    let mut buf = vec![0; 10000];
+    loop {
+        match xml.read_event(&mut buf) {
+            Ok(Event::Start(ref e)) if e.name() == "ns:Statistik".as_bytes() => count += 1,
+            Ok(Event::Eof) => break,
+            _ => {},
+        }
+        buf.clear();
+    }
+    println!("Statistik tags: {}", count);
+    /*
     let parser = EventReader::new(deflater);
 
     let mut count = 0;
@@ -65,3 +90,5 @@ fn main() {
     println!("{}", count);
     */
 }
+
+mod reader;

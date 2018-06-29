@@ -6,3 +6,4 @@ authors = ["danielbasedow <daniel.basedow@gmail.com>"]
 [dependencies]
 flate2 = "1.0"
 xml-rs = "0.8"
+quick-xml = "0.12"
