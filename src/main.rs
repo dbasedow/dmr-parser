@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::io::BufRead;
 
+//TODO make cli params
 const BUFFER_COUNT: usize = 6;
 const BUFFER_SIZE: usize = 100_000_000;
 
