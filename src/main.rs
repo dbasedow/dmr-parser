@@ -2,19 +2,26 @@ extern crate flate2;
 extern crate quick_xml;
 
 use flate2::bufread::DeflateDecoder;
+use quick_xml::events::Event;
+use quick_xml::Reader;
+use reader::DoubleBufferReader;
+use worker::parser_worker;
 use std::fs::File;
 use std::io;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::str::from_utf8;
-//use xml::reader::{EventReader, XmlEvent};
-use quick_xml::Reader;
-use quick_xml::events::Event;
-use reader::{DoubleBufferReader};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::io::BufRead;
+
+const BUFFER_COUNT: usize = 6;
+const BUFFER_SIZE: usize = 100_000_000;
 
 fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error> {
     let mut offset = 0;
     loop {
-        println!("{}", offset);
         if offset == buf.len() {
             return Ok(offset);
         }
@@ -28,8 +35,19 @@ fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error>
 }
 
 fn main() {
-    let f = File::open("ESStatistikListeModtag-20180610-200409.zip").unwrap();
-    let mut f = BufReader::new(f);
+    let (log_tx, log_rx): (Sender<String>, Receiver<String>) = channel();
+    let log_join = thread::spawn(move || {
+        while let Ok(s) = log_rx.recv() {
+            println!("{}", s);
+        }
+    });
+    process_file("ESStatistikListeModtag-20180610-200409.zip", log_tx);
+
+    //wait for logging to complete
+    log_join.join();
+}
+
+fn process_zip_header(f: &mut BufReader<File>) {
     let mut header_buf = [0; 30];
 
     f.read_exact(&mut header_buf)
@@ -41,54 +59,61 @@ fn main() {
 
     let mut name_extra_buf = vec![0; name_len + extra_len];
     f.read_exact(&mut name_extra_buf);
-    println!(
-        "parsing {}",
-        from_utf8(&name_extra_buf[..name_len]).unwrap()
-    );
+
+    //println!("{}", from_utf8(&name_extra_buf[..name_len]).unwrap());
+}
+
+fn process_file(filename: &str, log_tx: Sender<String>) {
+    let f = File::open(filename).unwrap();
+    let mut f = BufReader::new(f);
+
+    process_zip_header(&mut f);
 
     let mut deflater = DeflateDecoder::new(f);
-    //let mut deflater = BufReader::new(deflater);
 
-    let mut buf1 = vec![0; 100_000_000];
-    let mut buf2 = vec![0; 100_000_000];
-
-    //TODO: try!
-    if let Ok(n) = fill_buffer(&mut buf1, &mut deflater) {
-        println!("ok: {}", n);
+    let mut bufs = Vec::with_capacity(BUFFER_COUNT);
+    for _ in 0..BUFFER_COUNT {
+        bufs.push(Arc::new(RwLock::new(vec![0; BUFFER_SIZE])));
     }
-    if let Ok(n) = fill_buffer(&mut buf2, &mut deflater) {
-        println!("ok: {}", n);
-    }
-    let dbr = DoubleBufferReader::new(&buf1, &buf2);
-    let mut br = BufReader::new(dbr);
 
-    let mut xml = Reader::from_reader(br);
-    let mut count = 0;
-    let mut buf = vec![0; 10000];
+    //we need two buffers to start handing buffer pairs off to threads. create one now, so the
+    //loop doesn't have to care
+    {
+        let mut b = bufs[0].write().unwrap();
+        fill_buffer(&mut b, &mut deflater);
+    }
+    let mut count = 1;
+    let mut index;
+    let mut prev_index;
+    let mut completed = false;
     loop {
-        match xml.read_event(&mut buf) {
-            Ok(Event::Start(ref e)) if e.name() == "ns:Statistik".as_bytes() => count += 1,
-            Ok(Event::Eof) => break,
-            _ => {},
+        index = count % BUFFER_COUNT;
+        prev_index = (count - 1) % BUFFER_COUNT;
+        // scope for write lock
+        {
+            println!("waiting for write lock ({})", index);
+            let mut b = bufs[index].write().unwrap();
+            println!("got write lock");
+            if let Ok(n) = fill_buffer(&mut b, &mut deflater) {
+                if n < b.len() {
+                    println!("completed");
+                    completed = true;
+                }
+            }
         }
-        buf.clear();
+        let buf1 = bufs[prev_index].clone();
+        let buf2 = bufs[index].clone();
+        let logger = log_tx.clone();
+        println!("thread {} getting {} and {}", count, prev_index, index);
+        thread::spawn(move || {
+            parser_worker(buf1, buf2, logger, count);
+        });
+        count += 1;
+        if count % 10 == 0 {
+            println!("buffers {}", count);
+        }
     }
-    println!("Statistik tags: {}", count);
-    /*
-    let parser = EventReader::new(deflater);
-
-    let mut count = 0;
-    for e in parser {
-        match e {
-            Ok(XmlEvent::StartElement {ref name, ..}) if name.local_name == "Statistik" => count += 1,
-            _ => continue,
-        }
-        if count % 1000 == 0 {
-            println!("{}", count);
-        }
-    }
-    println!("{}", count);
-    */
 }
 
 mod reader;
+mod worker;
