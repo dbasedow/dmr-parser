@@ -5,6 +5,9 @@ pub struct DoubleBufferReader<'a> {
     first: &'a [u8],
     second: &'a [u8],
     position: usize,
+    //end in bytes, including the entire length of first and the bytes in second until first
+    //<ns:Statistik>. Will be initialized when end of first is reached
+    end: usize,
     finished: bool,
 }
 
@@ -14,6 +17,7 @@ impl<'a> DoubleBufferReader<'a> {
             first,
             second,
             position: 0,
+            end: 0, //this will be set during reading when needed
             finished: false,
         }
     }
@@ -48,20 +52,27 @@ impl<'a> Read for DoubleBufferReader<'a> {
             buf.copy_from_slice(&self.first[start..end]);
             return Ok(len);
         }
-        let end = find_str_in_u8("<ns:Statistik>", self.second).unwrap();
-        if end < buf.len() {
-            let buf = &mut buf[..end];
-            buf.copy_from_slice(&self.second[..end]);
+        if self.end == 0 {
+            let end = find_str_in_u8("<ns:Statistik>", self.second).unwrap();
+            self.end = end + self.first.len();
+        }
+
+        let end_in_second = self.end - self.first.len();
+        let pos_in_second = self.position - self.first.len();
+        let len = end_in_second - pos_in_second;
+
+        if len < buf.len() {
+            let buf = &mut buf[..len];
+            buf.copy_from_slice(&self.second[pos_in_second..end_in_second]);
             self.finished = true;
             //TODO: still have to send XML_POST
-            return Ok(end);
+            return Ok(len);
         } else {
-            let end = buf.len();
-            let buf = &mut buf[..end];
-            buf.copy_from_slice(&self.second[..end]);
+            let end = buf.len() + pos_in_second;
+            buf.copy_from_slice(&self.second[pos_in_second..end]);
+            self.position += buf.len();
             return Ok(buf.len());
         }
-        unimplemented!()
     }
 }
 
@@ -71,7 +82,6 @@ fn find_str_in_u8(needle: &str, haystack: &[u8]) -> Option<usize> {
 
 #[test]
 fn test_find_str_in_u8() {
-    println!("heys");
     let haystack = "Hello 34zhfu 3kf f34 ¶world";
     let needle = "3kf";
     assert_eq!(find_str_in_u8(&needle, haystack.as_bytes()), Some(13));
