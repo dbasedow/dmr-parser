@@ -118,7 +118,7 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
 
     // got through all buffers and try to acquire write lock. these calls block until no readers are
     // left. that way we know all threads have finished.
-    for i in 0..BUFFER_SIZE {
+    for i in 0..BUFFER_COUNT {
         bufs[i].write();
     }
 }
