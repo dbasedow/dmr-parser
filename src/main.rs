@@ -112,6 +112,17 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
 
         if completed {
             // spawn last thread
+            let next_index = (count + 1) % BUFFER_COUNT;
+            {
+                let mut b = bufs[next_index].write().unwrap();
+                b.truncate(0);
+            }
+            let buf1 = bufs[index].clone();
+            let buf2 = bufs[next_index].clone();
+            let logger = log_tx.clone();
+            thread::spawn(move || {
+                parser_worker(buf1, buf2, logger);
+            });
             break;
         }
     }

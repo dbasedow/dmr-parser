@@ -29,6 +29,7 @@ const XML_POST: &[u8] = b"</root>";
 // invariant: at EOF either first or second will be a slice over the buffer. the len() of both always indicates valid data to read
 impl<'a> Read for DoubleBufferReader<'a> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        //TODO: handle buf2 length = 0 -> last thread, find last </ns:Statistik>
         if self.finished {
             return Ok(0);
         }
