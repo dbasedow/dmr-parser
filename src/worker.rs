@@ -14,8 +14,7 @@ use std::sync::RwLock;
 use std::thread;
 
 
-pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sender<String>, id: usize) {
-    println!("start thread {}", id);
+pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sender<String>) {
     let b1 = b1.read().unwrap();
     let b2 = b2.read().unwrap();
     let dbr = DoubleBufferReader::new(&b1, &b2);
@@ -23,15 +22,15 @@ pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger:
 
     let mut xml = Reader::from_reader(br);
     let mut count = 0;
-    let mut buf = vec![0; 10000];
+    let mut buf = vec![0; 20000];
     loop {
         match xml.read_event(&mut buf) {
             Ok(Event::Start(ref e)) if e.name() == "ns:Statistik".as_bytes() => count += 1,
             Ok(Event::Eof) => break,
+            Err(e) => println!("{:?}", e),
             _ => {}
         }
         buf.clear();
     }
-    println!("finish ({})", id);
-    //logger.send(format!("Statistik tags: {}", count));
+    logger.send(format!("Statistik tags: {}", count));
 }

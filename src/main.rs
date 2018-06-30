@@ -42,6 +42,7 @@ fn main() {
         }
     });
     process_file("ESStatistikListeModtag-20180610-200409.zip", log_tx);
+    //try_dumps(log_tx);
 
     //wait for logging to complete
     log_join.join();
@@ -86,17 +87,16 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
     let mut index;
     let mut prev_index;
     let mut completed = false;
+
     loop {
         index = count % BUFFER_COUNT;
         prev_index = (count - 1) % BUFFER_COUNT;
         // scope for write lock
         {
-            println!("waiting for write lock ({})", index);
             let mut b = bufs[index].write().unwrap();
-            println!("got write lock");
             if let Ok(n) = fill_buffer(&mut b, &mut deflater) {
                 if n < b.len() {
-                    println!("completed");
+                    b.truncate(n);
                     completed = true;
                 }
             }
@@ -104,15 +104,38 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
         let buf1 = bufs[prev_index].clone();
         let buf2 = bufs[index].clone();
         let logger = log_tx.clone();
-        println!("thread {} getting {} and {}", count, prev_index, index);
         thread::spawn(move || {
-            parser_worker(buf1, buf2, logger, count);
+            parser_worker(buf1, buf2, logger);
         });
+
         count += 1;
-        if count % 10 == 0 {
-            println!("buffers {}", count);
+
+        if completed {
+            // spawn last thread
+            break;
         }
     }
+
+    // got through all buffers and try to acquire write lock. these calls block until no readers are
+    // left. that way we know all threads have finished.
+    for i in 0..BUFFER_SIZE {
+        bufs[i].write();
+    }
+}
+
+fn try_dumps(logger: Sender<String>) {
+    let mut b1 = vec![0; BUFFER_SIZE];
+    let mut b2 = vec![0; BUFFER_SIZE];
+    let mut f = File::open("87_1").unwrap();
+    f.read_exact(&mut b1);
+
+    let mut f = File::open("87_2").unwrap();
+    f.read_exact(&mut b2);
+
+    let a = Arc::new(RwLock::new(b1));
+    let b = Arc::new(RwLock::new(b2));
+
+    parser_worker(a, b, logger);
 }
 
 mod reader;
