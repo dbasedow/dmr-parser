@@ -20,10 +20,49 @@ use std::thread;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::io::BufRead;
+use std::env;
+use std::str::FromStr;
 
-//TODO make cli params
-const BUFFER_COUNT: usize = 8;
-const BUFFER_SIZE: usize = 150_000_000;
+const BUFFER_COUNT_DEFAULT: usize = 8;
+const BUFFER_SIZE_DEFAULT: usize = 150_000_000;
+
+fn get_usize_env_or(key: &str, default: usize) -> usize {
+    match env::var(key) {
+        Ok(v) => {
+            match usize::from_str(&v) {
+                Ok(n) => n,
+                Err(_) => default,
+            }
+        }
+        Err(_) => default,
+    }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: dmrparse filename.zip");
+        return;
+    }
+
+    let filename = &args[1];
+
+    let (log_tx, log_rx): (Sender<String>, Receiver<String>) = channel();
+    let log_join = thread::spawn(move || {
+        while let Ok(s) = log_rx.recv() {
+            println!("{}", s);
+        }
+    });
+
+    let buffer_count = get_usize_env_or("DMR_PARSE_BUFFER_COUNT", BUFFER_COUNT_DEFAULT);
+    let buffer_size = get_usize_env_or("DMR_PARSE_BUFFER_SIZE", BUFFER_SIZE_DEFAULT);
+
+    eprintln!("Buffer count: {} size: {}", buffer_count, buffer_size);
+    process_file(filename, log_tx, buffer_count, buffer_size);
+
+    //wait for logging to complete
+    log_join.join();
+}
 
 fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error> {
     let mut offset = 0;
@@ -40,20 +79,6 @@ fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error>
     }
 }
 
-fn main() {
-    let (log_tx, log_rx): (Sender<String>, Receiver<String>) = channel();
-    let log_join = thread::spawn(move || {
-        while let Ok(s) = log_rx.recv() {
-            println!("{}", s);
-        }
-    });
-    process_file("ESStatistikListeModtag-20180610-200409.zip", log_tx);
-    //try_dumps(log_tx);
-
-    //wait for logging to complete
-    log_join.join();
-}
-
 fn process_zip_header(f: &mut BufReader<File>) {
     let mut header_buf = [0; 30];
 
@@ -66,11 +91,9 @@ fn process_zip_header(f: &mut BufReader<File>) {
 
     let mut name_extra_buf = vec![0; name_len + extra_len];
     f.read_exact(&mut name_extra_buf);
-
-    //println!("{}", from_utf8(&name_extra_buf[..name_len]).unwrap());
 }
 
-fn process_file(filename: &str, log_tx: Sender<String>) {
+fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize, buffer_size: usize) {
     let f = File::open(filename).unwrap();
     let mut f = BufReader::new(f);
 
@@ -78,9 +101,9 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
 
     let mut deflater = DeflateDecoder::new(f);
 
-    let mut bufs = Vec::with_capacity(BUFFER_COUNT);
-    for _ in 0..BUFFER_COUNT {
-        bufs.push(Arc::new(RwLock::new(vec![0; BUFFER_SIZE])));
+    let mut bufs = Vec::with_capacity(buffer_count);
+    for _ in 0..buffer_count {
+        bufs.push(Arc::new(RwLock::new(vec![0; buffer_size])));
     }
 
     //we need two buffers to start handing buffer pairs off to threads. create one now, so the
@@ -95,8 +118,8 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
     let mut completed = false;
 
     loop {
-        index = count % BUFFER_COUNT;
-        prev_index = (count - 1) % BUFFER_COUNT;
+        index = count % buffer_count;
+        prev_index = (count - 1) % buffer_count;
         // scope for write lock
         {
             let mut b = bufs[index].write().unwrap();
@@ -118,7 +141,7 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
 
         if completed {
             // spawn last thread
-            let next_index = (count + 1) % BUFFER_COUNT;
+            let next_index = (count + 1) % buffer_count;
             {
                 let mut b = bufs[next_index].write().unwrap();
                 b.truncate(0);
@@ -135,24 +158,9 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
 
     // go through all buffers and try to acquire write lock. these calls block until no readers are
     // left. that way we know all threads have finished.
-    for i in 0..BUFFER_COUNT {
+    for i in 0..buffer_count {
         bufs[i].write();
     }
-}
-
-fn try_dumps(logger: Sender<String>) {
-    let mut b1 = vec![0; BUFFER_SIZE];
-    let mut b2 = vec![0; BUFFER_SIZE];
-    let mut f = File::open("87_1").unwrap();
-    f.read_exact(&mut b1);
-
-    let mut f = File::open("87_2").unwrap();
-    f.read_exact(&mut b2);
-
-    let a = Arc::new(RwLock::new(b1));
-    let b = Arc::new(RwLock::new(b2));
-
-    parser_worker(a, b, logger);
 }
 
 mod reader;
