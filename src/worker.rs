@@ -1,5 +1,3 @@
-extern crate quick_xml;
-
 use flate2::bufread::DeflateDecoder;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -12,8 +10,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::RwLock;
 use std::thread;
+use serde_json;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct CarInfo {
     id: String,
     typ: String,
@@ -30,6 +29,7 @@ struct CarInfo {
     status_date: String,
 
     //Keep track of where the xml parser is
+    #[serde(skip_serializing)]
     current_tag: CurrentTag,
 }
 
@@ -126,16 +126,15 @@ pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger:
             }
             Ok(Event::End(ref tag)) => {
                 match tag.name() {
-                    b"ns:Statistik" => println!("{:?}", cur_car),
+                    b"ns:Statistik" => { logger.send(serde_json::to_string(&cur_car).unwrap()); }
                     _ => cur_car.current_tag = CurrentTag::None,
                 }
             }
             Ok(Event::Text(e)) => cur_car.handle_text(e.unescape_and_decode(&xml).unwrap()),
             Ok(Event::Eof) => break,
-            Err(e) => println!("{:?}", e),
+            Err(e) => eprintln!("{:?}", e),
             _ => {}
         }
         buf.clear();
     }
-    logger.send(format!("Statistik tags: {}", count));
 }

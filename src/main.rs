@@ -1,5 +1,10 @@
 extern crate flate2;
 extern crate quick_xml;
+extern crate serde;
+extern crate serde_json;
+
+#[macro_use]
+extern crate serde_derive;
 
 use flate2::bufread::DeflateDecoder;
 use quick_xml::events::Event;
@@ -17,8 +22,8 @@ use std::sync::RwLock;
 use std::io::BufRead;
 
 //TODO make cli params
-const BUFFER_COUNT: usize = 6;
-const BUFFER_SIZE: usize = 100_000_000;
+const BUFFER_COUNT: usize = 8;
+const BUFFER_SIZE: usize = 150_000_000;
 
 fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error> {
     let mut offset = 0;
@@ -128,7 +133,7 @@ fn process_file(filename: &str, log_tx: Sender<String>) {
         }
     }
 
-    // got through all buffers and try to acquire write lock. these calls block until no readers are
+    // go through all buffers and try to acquire write lock. these calls block until no readers are
     // left. that way we know all threads have finished.
     for i in 0..BUFFER_COUNT {
         bufs[i].write();
