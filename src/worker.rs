@@ -114,10 +114,7 @@ fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sen
                     b"ns:KoeretoejMaerkeTypeNavn" => cur_car.current_tag = CurrentTag::Brand,
                     b"ns:KoeretoejModelTypeNavn" => cur_car.current_tag = CurrentTag::Model,
                     b"ns:KoeretoejVariantTypeNavn" => cur_car.current_tag = CurrentTag::Variant,
-                    b"ns:KoeretoejOplysningModelAar" => {
-                        cur_car.current_tag = CurrentTag::ModelYear;
-                        eprint!(".");
-                    }
+                    b"ns:KoeretoejOplysningModelAar" => cur_car.current_tag = CurrentTag::ModelYear,
                     b"ns:RegistreringNummerUdloebDato" => cur_car.current_tag = CurrentTag::RegistrationEnded,
                     b"ns:KoeretoejRegistreringStatus" => cur_car.current_tag = CurrentTag::Status,
                     b"ns:KoeretoejRegistreringStatusDato" => cur_car.current_tag = CurrentTag::StatusDate,
@@ -126,7 +123,11 @@ fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sen
             }
             Ok(Event::End(ref tag)) => {
                 match tag.name() {
-                    b"ns:Statistik" => { logger.send(serde_json::to_string(&cur_car).unwrap()); }
+                    b"ns:Statistik" => {
+                        if cur_car.vin.len() == 17 {
+                            logger.send(serde_json::to_string(&cur_car).unwrap());
+                        }
+                    }
                     _ => cur_car.current_tag = CurrentTag::None,
                 }
             }
