@@ -9,6 +9,8 @@ use std::env;
 use std::str::FromStr;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
+use std::io;
+use std::io::Write;
 use worker::process_file;
 
 const BUFFER_COUNT_DEFAULT: usize = 8;
@@ -37,8 +39,10 @@ fn main() {
 
     let (log_tx, log_rx): (Sender<String>, Receiver<String>) = channel();
     let log_join = thread::spawn(move || {
+        let mut stdout = io::stdout();
+        stdout.lock();
         while let Ok(s) = log_rx.recv() {
-            println!("{}", s);
+            stdout.write(format!("{}\n", s).as_bytes());
         }
     });
 
