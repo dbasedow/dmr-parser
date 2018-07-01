@@ -24,7 +24,6 @@ impl<'a> DoubleBufferReader<'a> {
 }
 
 const XML_PRE: &[u8] = b"<root>";
-const XML_POST: &[u8] = b"</root>";
 
 // invariant: at EOF either first or second will be a slice over the buffer. the len() of both always indicates valid data to read
 impl<'a> Read for DoubleBufferReader<'a> {

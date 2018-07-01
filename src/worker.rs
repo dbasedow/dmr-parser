@@ -4,10 +4,9 @@ use quick_xml::Reader;
 use reader::DoubleBufferReader;
 use std::fs::File;
 use std::io;
-use std::io::{BufReader, Read, Write};
-use std::str::from_utf8;
+use std::io::{BufReader, Read};
 use std::sync::Arc;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::RwLock;
 use std::thread;
 use serde_json;
@@ -69,7 +68,6 @@ impl CarInfo {
             CurrentTag::RegistrationEnded => self.registration_ended = v,
             CurrentTag::Status => self.status = v,
             CurrentTag::StatusDate => self.status_date = v,
-            _ => {}
         }
     }
 }
@@ -92,14 +90,13 @@ enum CurrentTag {
     StatusDate,
 }
 
-pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sender<String>) {
+fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sender<String>) {
     let b1 = b1.read().unwrap();
     let b2 = b2.read().unwrap();
     let dbr = DoubleBufferReader::new(&b1, &b2);
     let br = BufReader::new(dbr);
 
     let mut xml = Reader::from_reader(br);
-    let mut count = 0;
     let mut buf = vec![0; 20000];
     let mut cur_car = CarInfo::new();
 
@@ -117,7 +114,10 @@ pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger:
                     b"ns:KoeretoejMaerkeTypeNavn" => cur_car.current_tag = CurrentTag::Brand,
                     b"ns:KoeretoejModelTypeNavn" => cur_car.current_tag = CurrentTag::Model,
                     b"ns:KoeretoejVariantTypeNavn" => cur_car.current_tag = CurrentTag::Variant,
-                    b"ns:KoeretoejOplysningModelAar" => cur_car.current_tag = CurrentTag::ModelYear,
+                    b"ns:KoeretoejOplysningModelAar" => {
+                        cur_car.current_tag = CurrentTag::ModelYear;
+                        eprint!(".");
+                    }
                     b"ns:RegistreringNummerUdloebDato" => cur_car.current_tag = CurrentTag::RegistrationEnded,
                     b"ns:KoeretoejRegistreringStatus" => cur_car.current_tag = CurrentTag::Status,
                     b"ns:KoeretoejRegistreringStatusDato" => cur_car.current_tag = CurrentTag::StatusDate,
@@ -136,5 +136,104 @@ pub fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger:
             _ => {}
         }
         buf.clear();
+    }
+}
+
+fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error> {
+    let mut offset = 0;
+    loop {
+        if offset == buf.len() {
+            return Ok(offset);
+        }
+        match rdr.read(&mut buf[offset..]) {
+            Ok(0) => return Ok(offset),
+            Ok(n) => offset += n,
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn process_zip_header(f: &mut BufReader<File>) {
+    let mut header_buf = [0; 30];
+
+    f.read_exact(&mut header_buf)
+        .expect("unable to read header");
+
+    assert_eq!(header_buf[..4], [0x50, 0x4b, 0x03, 0x04]);
+    let name_len = ((header_buf[27] as usize) << 8) + header_buf[26] as usize;
+    let extra_len = ((header_buf[29] as usize) << 8) + header_buf[28] as usize;
+
+    let mut name_extra_buf = vec![0; name_len + extra_len];
+    f.read_exact(&mut name_extra_buf);
+}
+
+pub fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize, buffer_size: usize) {
+    let f = File::open(filename).unwrap();
+    let mut f = BufReader::new(f);
+
+    process_zip_header(&mut f);
+
+    let mut deflater = DeflateDecoder::new(f);
+
+    let mut bufs = Vec::with_capacity(buffer_count);
+    for _ in 0..buffer_count {
+        bufs.push(Arc::new(RwLock::new(vec![0; buffer_size])));
+    }
+
+    //we need two buffers to start handing buffer pairs off to threads. create one now, so the
+    //loop doesn't have to care
+    {
+        let mut b = bufs[0].write().unwrap();
+        fill_buffer(&mut b, &mut deflater);
+    }
+    let mut count = 1;
+    let mut index;
+    let mut prev_index;
+    let mut completed = false;
+
+    loop {
+        index = count % buffer_count;
+        prev_index = (count - 1) % buffer_count;
+        // scope for write lock
+        {
+            let mut b = bufs[index].write().unwrap();
+            if let Ok(n) = fill_buffer(&mut b, &mut deflater) {
+                if n < b.len() {
+                    b.truncate(n);
+                    completed = true;
+                }
+            }
+        }
+        let buf1 = bufs[prev_index].clone();
+        let buf2 = bufs[index].clone();
+        let logger = log_tx.clone();
+        thread::spawn(move || {
+            parser_worker(buf1, buf2, logger);
+        });
+
+        count += 1;
+
+        if completed {
+            // spawn last thread
+            let next_index = (count + 1) % buffer_count;
+            {
+                let mut b = bufs[next_index].write().unwrap();
+                b.truncate(0);
+            }
+            let buf1 = bufs[index].clone();
+            let buf2 = bufs[next_index].clone();
+            let logger = log_tx.clone();
+            thread::spawn(move || {
+                parser_worker(buf1, buf2, logger);
+            });
+            break;
+        }
+    }
+
+    // go through all buffers and try to acquire write lock. these calls block until no readers are
+    // left. that way we know all threads have finished.
+    for i in 0..buffer_count {
+        bufs[i].write();
     }
 }
