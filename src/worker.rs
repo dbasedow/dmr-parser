@@ -97,6 +97,8 @@ fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sen
     let br = BufReader::new(dbr);
 
     let mut xml = Reader::from_reader(br);
+    xml.check_end_names(false);
+
     let mut buf = vec![0; 20000];
     let mut cur_car = CarInfo::new();
 
