@@ -3,6 +3,9 @@ name = "dmrparse"
 version = "0.1.0"
 authors = ["danielbasedow <daniel.basedow@gmail.com>"]
 
+[profile.release]
+debug = false
+
 [dependencies]
 flate2 = "1.0"
 quick-xml = "0.12"

@@ -1,10 +1,10 @@
 use flate2::bufread::DeflateDecoder;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesText, Event};
 use quick_xml::Reader;
 use reader::DoubleBufferReader;
 use std::fs::File;
 use std::io;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, BufRead, Read};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::RwLock;
@@ -49,25 +49,25 @@ impl CarInfo {
             status: String::new(),
             status_date: String::new(),
             current_tag: CurrentTag::None,
-        }
+        } 
     }
 
-    fn handle_text(&mut self, v: String) {
+    fn handle_text<B: BufRead>(&mut self, e: &BytesText, xml: &Reader<B>) {
         match self.current_tag {
             CurrentTag::None => return,
-            CurrentTag::Id => self.id = v,
-            CurrentTag::Type => self.typ = v,
-            CurrentTag::TypeName => self.type_name = v,
-            CurrentTag::LicensePlate => self.license_plate = v,
-            CurrentTag::Vin => self.vin = v,
-            CurrentTag::FirstRegistration => self.first_registration = v,
-            CurrentTag::Brand => self.brand = v,
-            CurrentTag::Model => self.model = v,
-            CurrentTag::Variant => self.variant = v,
-            CurrentTag::ModelYear => self.model_year = v,
-            CurrentTag::RegistrationEnded => self.registration_ended = v,
-            CurrentTag::Status => self.status = v,
-            CurrentTag::StatusDate => self.status_date = v,
+            CurrentTag::Id => self.id = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Type => self.typ = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::TypeName => self.type_name = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::LicensePlate => self.license_plate = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Vin => self.vin = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::FirstRegistration => self.first_registration = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Brand => self.brand = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Model => self.model = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Variant => self.variant = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::ModelYear => self.model_year = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::RegistrationEnded => self.registration_ended = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Status => self.status = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::StatusDate => self.status_date = e.unescape_and_decode(&xml).unwrap(),
         }
     }
 }
@@ -131,7 +131,7 @@ fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sen
                     _ => cur_car.current_tag = CurrentTag::None,
                 }
             }
-            Ok(Event::Text(e)) => cur_car.handle_text(e.unescape_and_decode(&xml).unwrap()),
+            Ok(Event::Text(e)) => cur_car.handle_text(&e, &xml),
             Ok(Event::Eof) => break,
             Err(e) => eprintln!("{:?}", e),
             _ => {}
