@@ -39,10 +39,10 @@ fn main() {
 
     let (log_tx, log_rx): (Sender<String>, Receiver<String>) = channel();
     let log_join = thread::spawn(move || {
-        let mut stdout = io::stdout();
-        stdout.lock();
+        let stdout = io::stdout();
+        let mut stdout_handle = stdout.lock();
         while let Ok(s) = log_rx.recv() {
-            stdout.write(format!("{}\n", s).as_bytes());
+            stdout_handle.write(format!("{}\n", s).as_bytes()).unwrap();
         }
     });
 
