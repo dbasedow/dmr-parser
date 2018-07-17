@@ -127,7 +127,7 @@ fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sen
                 match tag.name() {
                     b"ns:Statistik" => {
                         if cur_car.vin.len() == 17 {
-                            logger.send(serde_json::to_string(&cur_car).unwrap());
+                            let _ = logger.send(serde_json::to_string(&cur_car).unwrap());
                         }
                     }
                     _ => cur_car.current_tag = CurrentTag::None,
@@ -157,7 +157,7 @@ fn fill_buffer<T: Read>(buf: &mut [u8], rdr: &mut T) -> Result<usize, io::Error>
     }
 }
 
-fn process_zip_header(f: &mut BufReader<File>) {
+fn process_zip_header(f: &mut BufReader<File>) -> io::Result<()> {
     let mut header_buf = [0; 30];
 
     f.read_exact(&mut header_buf)
@@ -168,14 +168,15 @@ fn process_zip_header(f: &mut BufReader<File>) {
     let extra_len = ((header_buf[29] as usize) << 8) + header_buf[28] as usize;
 
     let mut name_extra_buf = vec![0; name_len + extra_len];
-    f.read_exact(&mut name_extra_buf);
+    f.read_exact(&mut name_extra_buf)?;
+    Ok(())
 }
 
-pub fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize, buffer_size: usize) {
+pub fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize, buffer_size: usize) -> io::Result<()> {
     let f = File::open(filename).unwrap();
     let mut f = BufReader::new(f);
 
-    process_zip_header(&mut f);
+    process_zip_header(&mut f)?;
 
     let mut deflater = DeflateDecoder::new(f);
 
@@ -188,7 +189,7 @@ pub fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize,
     //loop doesn't have to care
     {
         let mut b = bufs[0].write().unwrap();
-        fill_buffer(&mut b, &mut deflater);
+        fill_buffer(&mut b, &mut deflater)?;
     }
     let mut count = 1;
     let mut index;
@@ -237,6 +238,7 @@ pub fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize,
     // go through all buffers and try to acquire write lock. these calls block until no readers are
     // left. that way we know all threads have finished.
     for i in 0..buffer_count {
-        bufs[i].write();
+        let _ = bufs[i].write().unwrap();
     }
+    Ok(())
 }

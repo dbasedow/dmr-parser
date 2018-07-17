@@ -49,10 +49,10 @@ fn main() {
     let buffer_count = get_usize_env_or("DMR_PARSE_BUFFER_COUNT", BUFFER_COUNT_DEFAULT);
     let buffer_size = get_usize_env_or("DMR_PARSE_BUFFER_SIZE", BUFFER_SIZE_DEFAULT);
 
-    process_file(filename, log_tx, buffer_count, buffer_size);
+    let _ = process_file(filename, log_tx, buffer_count, buffer_size).unwrap();
 
     //wait for logging to complete
-    log_join.join();
+    log_join.join().unwrap();
 }
 
 mod reader;
