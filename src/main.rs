@@ -16,14 +16,12 @@ use worker::process_file;
 const BUFFER_COUNT_DEFAULT: usize = 8;
 const BUFFER_SIZE_DEFAULT: usize = 150_000_000;
 
-fn get_usize_env_or(key: &str, default: usize) -> Result<usize, std::num::ParseIntError> {
-    Ok(
-        if let Ok(value) = env::var(key) {
-            usize::from_str(&value)?
-        } else {
-            default
-        }
-    )
+fn get_env_or<T: FromStr>(key: &str, default: T) -> Result<T, T::Err> {
+    Ok(if let Ok(value) = std::env::var(key) {
+        T::from_str(&value)?
+    } else {
+        default
+    })
 }
 
 fn main() {
@@ -44,8 +42,8 @@ fn main() {
         }
     });
 
-    let buffer_count = get_usize_env_or("DMR_PARSE_BUFFER_COUNT", BUFFER_COUNT_DEFAULT).unwrap();
-    let buffer_size = get_usize_env_or("DMR_PARSE_BUFFER_SIZE", BUFFER_SIZE_DEFAULT).unwrap();
+    let buffer_count = get_env_or("DMR_PARSE_BUFFER_COUNT", BUFFER_COUNT_DEFAULT).unwrap();
+    let buffer_size = get_env_or("DMR_PARSE_BUFFER_SIZE", BUFFER_SIZE_DEFAULT).unwrap();
 
     let _ = process_file(filename, log_tx, buffer_count, buffer_size).unwrap();
 
