@@ -16,16 +16,12 @@ use worker::process_file;
 const BUFFER_COUNT_DEFAULT: usize = 8;
 const BUFFER_SIZE_DEFAULT: usize = 150_000_000;
 
-fn get_usize_env_or(key: &str, default: usize) -> usize {
-    match env::var(key) {
-        Ok(v) => {
-            match usize::from_str(&v) {
-                Ok(n) => n,
-                Err(_) => default,
-            }
-        }
-        Err(_) => default,
-    }
+fn get_env_or<T: FromStr>(key: &str, default: T) -> Result<T, T::Err> {
+    Ok(if let Ok(value) = std::env::var(key) {
+        T::from_str(&value)?
+    } else {
+        default
+    })
 }
 
 fn main() {
@@ -39,20 +35,20 @@ fn main() {
 
     let (log_tx, log_rx): (Sender<String>, Receiver<String>) = channel();
     let log_join = thread::spawn(move || {
-        let mut stdout = io::stdout();
-        stdout.lock();
+        let stdout = io::stdout();
+        let mut stdout_handle = stdout.lock();
         while let Ok(s) = log_rx.recv() {
-            stdout.write(format!("{}\n", s).as_bytes());
+            stdout_handle.write(format!("{}\n", s).as_bytes()).unwrap();
         }
     });
 
-    let buffer_count = get_usize_env_or("DMR_PARSE_BUFFER_COUNT", BUFFER_COUNT_DEFAULT);
-    let buffer_size = get_usize_env_or("DMR_PARSE_BUFFER_SIZE", BUFFER_SIZE_DEFAULT);
+    let buffer_count = get_env_or("DMR_PARSE_BUFFER_COUNT", BUFFER_COUNT_DEFAULT).unwrap();
+    let buffer_size = get_env_or("DMR_PARSE_BUFFER_SIZE", BUFFER_SIZE_DEFAULT).unwrap();
 
-    process_file(filename, log_tx, buffer_count, buffer_size);
+    let _ = process_file(filename, log_tx, buffer_count, buffer_size).unwrap();
 
     //wait for logging to complete
-    log_join.join();
+    log_join.join().unwrap();
 }
 
 mod reader;
