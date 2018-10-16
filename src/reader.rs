@@ -1,4 +1,4 @@
-use std::io::{Read, Result};
+use std::io::{self, Read, Result};
 
 #[derive(Debug)]
 pub struct DoubleBufferReader<'a> {
@@ -34,7 +34,8 @@ impl<'a> Read for DoubleBufferReader<'a> {
         }
         if self.position == 0 {
             //seek to first <ns:Statistik>
-            self.position = find_str_in_u8("<ns:Statistik>", self.first).unwrap();
+            self.position =
+                find_str_in_u8("<ns:Statistik>", self.first).expect("pos=0; no statistic");
             let buf = &mut buf[..XML_PRE.len()];
             buf.copy_from_slice(XML_PRE);
             return Ok(XML_PRE.len());
@@ -53,8 +54,11 @@ impl<'a> Read for DoubleBufferReader<'a> {
             return Ok(len);
         }
         if self.end == 0 {
-            let end = find_str_in_u8("<ns:Statistik>", self.second).unwrap();
-            self.end = end + self.first.len();
+            if let Some(end) = find_str_in_u8("<ns:Statistik>", self.second) {
+                self.end = end + self.first.len();
+            } else {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "end of file"));
+            }
         }
 
         let end_in_second = self.end - self.first.len();
@@ -77,7 +81,9 @@ impl<'a> Read for DoubleBufferReader<'a> {
 }
 
 fn find_str_in_u8(needle: &str, haystack: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle.as_bytes())
+    haystack
+        .windows(needle.len())
+        .position(|w| w == needle.as_bytes())
 }
 
 #[test]

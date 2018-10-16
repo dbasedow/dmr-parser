@@ -2,30 +2,30 @@ use flate2::bufread::DeflateDecoder;
 use quick_xml::events::{BytesText, Event};
 use quick_xml::Reader;
 use reader::DoubleBufferReader;
+use serde_json;
 use std::fs::File;
 use std::io;
-use std::io::{BufReader, BufRead, Read};
-use std::sync::Arc;
+use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
-use serde_json;
 
 #[derive(Debug, Serialize)]
 struct CarInfo {
-    id: String,
-    typ: String,
-    type_name: String,
-    license_plate: String,
-    vin: String,
-    first_registration: String,
-    brand: String,
-    model: String,
-    variant: String,
-    model_year: String,
-    registration_ended: String,
-    status: String,
-    status_date: String,
+    id: Option<String>,
+    typ: Option<String>,
+    type_name: Option<String>,
+    license_plate: Option<String>,
+    vin: Option<String>,
+    first_registration: Option<String>,
+    brand: Option<String>,
+    model: Option<String>,
+    variant: Option<String>,
+    model_year: Option<String>,
+    registration_ended: Option<String>,
+    status: Option<String>,
+    status_date: Option<String>,
 
     //Keep track of where the xml parser is
     #[serde(skip_serializing)]
@@ -35,39 +35,43 @@ struct CarInfo {
 impl CarInfo {
     fn new() -> Self {
         CarInfo {
-            id: String::new(),
-            typ: String::new(),
-            type_name: String::new(),
-            license_plate: String::new(),
-            vin: String::new(),
-            first_registration: String::new(),
-            brand: String::new(),
-            model: String::new(),
-            variant: String::new(),
-            model_year: String::new(),
-            registration_ended: String::new(),
-            status: String::new(),
-            status_date: String::new(),
+            id: None,
+            typ: None,
+            type_name: None,
+            license_plate: None,
+            vin: None,
+            first_registration: None,
+            brand: None,
+            model: None,
+            variant: None,
+            model_year: None,
+            registration_ended: None,
+            status: None,
+            status_date: None,
             current_tag: CurrentTag::None,
-        } 
+        }
     }
 
     fn handle_text<B: BufRead>(&mut self, e: &BytesText, xml: &Reader<B>) {
         match self.current_tag {
             CurrentTag::None => return,
-            CurrentTag::Id => self.id = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::Type => self.typ = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::TypeName => self.type_name = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::LicensePlate => self.license_plate = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::Vin => self.vin = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::FirstRegistration => self.first_registration = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::Brand => self.brand = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::Model => self.model = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::Variant => self.variant = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::ModelYear => self.model_year = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::RegistrationEnded => self.registration_ended = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::Status => self.status = e.unescape_and_decode(&xml).unwrap(),
-            CurrentTag::StatusDate => self.status_date = e.unescape_and_decode(&xml).unwrap(),
+            CurrentTag::Id => self.id = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::Type => self.typ = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::TypeName => self.type_name = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::LicensePlate => self.license_plate = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::Vin => self.vin = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::FirstRegistration => {
+                self.first_registration = e.unescape_and_decode(&xml).ok()
+            }
+            CurrentTag::Brand => self.brand = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::Model => self.model = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::Variant => self.variant = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::ModelYear => self.model_year = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::RegistrationEnded => {
+                self.registration_ended = e.unescape_and_decode(&xml).ok()
+            }
+            CurrentTag::Status => self.status = e.unescape_and_decode(&xml).ok(),
+            CurrentTag::StatusDate => self.status_date = e.unescape_and_decode(&xml).ok(),
         }
     }
 }
@@ -104,35 +108,39 @@ fn parser_worker(b1: Arc<RwLock<Vec<u8>>>, b2: Arc<RwLock<Vec<u8>>>, logger: Sen
 
     loop {
         match xml.read_event(&mut buf) {
-            Ok(Event::Start(ref tag)) => {
-                match tag.name() {
-                    b"ns:Statistik" => cur_car = CarInfo::new(),
-                    b"ns:KoeretoejIdent" => cur_car.current_tag = CurrentTag::Id,
-                    b"ns:KoeretoejArtNummer" => cur_car.current_tag = CurrentTag::Type,
-                    b"ns:KoeretoejArtNavn" => cur_car.current_tag = CurrentTag::TypeName,
-                    b"ns:RegistreringNummerNummer" => cur_car.current_tag = CurrentTag::LicensePlate,
-                    b"ns:KoeretoejOplysningStelNummer" => cur_car.current_tag = CurrentTag::Vin,
-                    b"ns:KoeretoejOplysningFoersteRegistreringDato" => cur_car.current_tag = CurrentTag::FirstRegistration,
-                    b"ns:KoeretoejMaerkeTypeNavn" => cur_car.current_tag = CurrentTag::Brand,
-                    b"ns:KoeretoejModelTypeNavn" => cur_car.current_tag = CurrentTag::Model,
-                    b"ns:KoeretoejVariantTypeNavn" => cur_car.current_tag = CurrentTag::Variant,
-                    b"ns:KoeretoejOplysningModelAar" => cur_car.current_tag = CurrentTag::ModelYear,
-                    b"ns:RegistreringNummerUdloebDato" => cur_car.current_tag = CurrentTag::RegistrationEnded,
-                    b"ns:KoeretoejRegistreringStatus" => cur_car.current_tag = CurrentTag::Status,
-                    b"ns:KoeretoejRegistreringStatusDato" => cur_car.current_tag = CurrentTag::StatusDate,
-                    _ => {}
+            Ok(Event::Start(ref tag)) => match tag.name() {
+                b"ns:Statistik" => cur_car = CarInfo::new(),
+                b"ns:KoeretoejIdent" => cur_car.current_tag = CurrentTag::Id,
+                b"ns:KoeretoejArtNummer" => cur_car.current_tag = CurrentTag::Type,
+                b"ns:KoeretoejArtNavn" => cur_car.current_tag = CurrentTag::TypeName,
+                b"ns:RegistreringNummerNummer" => cur_car.current_tag = CurrentTag::LicensePlate,
+                b"ns:KoeretoejOplysningStelNummer" => cur_car.current_tag = CurrentTag::Vin,
+                b"ns:KoeretoejOplysningFoersteRegistreringDato" => {
+                    cur_car.current_tag = CurrentTag::FirstRegistration
                 }
-            }
-            Ok(Event::End(ref tag)) => {
-                match tag.name() {
-                    b"ns:Statistik" => {
-                        if cur_car.vin.len() == 17 {
+                b"ns:KoeretoejMaerkeTypeNavn" => cur_car.current_tag = CurrentTag::Brand,
+                b"ns:KoeretoejModelTypeNavn" => cur_car.current_tag = CurrentTag::Model,
+                b"ns:KoeretoejVariantTypeNavn" => cur_car.current_tag = CurrentTag::Variant,
+                b"ns:KoeretoejOplysningModelAar" => cur_car.current_tag = CurrentTag::ModelYear,
+                b"ns:RegistreringNummerUdloebDato" => {
+                    cur_car.current_tag = CurrentTag::RegistrationEnded
+                }
+                b"ns:KoeretoejRegistreringStatus" => cur_car.current_tag = CurrentTag::Status,
+                b"ns:KoeretoejRegistreringStatusDato" => {
+                    cur_car.current_tag = CurrentTag::StatusDate
+                }
+                _ => {}
+            },
+            Ok(Event::End(ref tag)) => match tag.name() {
+                b"ns:Statistik" => {
+                    if let Some(ref vin) = cur_car.vin {
+                        if vin.len() == 17 {
                             let _ = logger.send(serde_json::to_string(&cur_car).unwrap());
                         }
                     }
-                    _ => cur_car.current_tag = CurrentTag::None,
                 }
-            }
+                _ => cur_car.current_tag = CurrentTag::None,
+            },
             Ok(Event::Text(e)) => cur_car.handle_text(&e, &xml),
             Ok(Event::Eof) => break,
             Err(e) => eprintln!("{:?}", e),
@@ -172,7 +180,12 @@ fn process_zip_header(f: &mut BufReader<File>) -> io::Result<()> {
     Ok(())
 }
 
-pub fn process_file(filename: &str, log_tx: Sender<String>, buffer_count: usize, buffer_size: usize) -> io::Result<()> {
+pub fn process_file(
+    filename: &str,
+    log_tx: Sender<String>,
+    buffer_count: usize,
+    buffer_size: usize,
+) -> io::Result<()> {
     let f = File::open(filename).unwrap();
     let mut f = BufReader::new(f);
 
